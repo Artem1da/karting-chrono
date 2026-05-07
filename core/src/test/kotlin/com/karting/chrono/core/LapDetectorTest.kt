@@ -54,20 +54,25 @@ class LapDetectorTest {
         // prev at y = -1, cur at y = +9 -> crossing at t = 0.1 along [prev, cur]
         det.onSample(sample(10_000, 0.0, -1.0))
         det.onSample(sample(11_000, 0.0, 9.0))
-        // First crossing: timer starts at 10_000 + 0.1 * 1000 = 10_100
-        assertEquals(10_100L, det.currentLapStartMs())
+        // First crossing: timer starts at 10_000 + 0.1 * 1000 = 10_100.
+        // Allow 1 ms of slack for the lat/lon -> meters round-trip.
+        val start = det.currentLapStartMs()!!
+        assertEquals(10_100.0, start.toDouble(), 1.0)
     }
 
     @Test
     fun `two crossings yield one lap with interpolated duration`() {
-        val det = LapDetector(line(), LapDetectorConfig(minLapMs = 1_000L))
+        // Use a min-lap guard large enough to swallow the implicit "walk back"
+        // crossing that occurs when our synthetic trace teleports from north
+        // to south through the line between the two intentional crossings.
+        val det = LapDetector(line(), LapDetectorConfig(minLapMs = 25_000L))
         det.onSample(sample(0, 0.0, -5.0))
-        det.onSample(sample(1_000, 0.0, 5.0))   // crossing at 500
-        det.onSample(sample(40_000, 0.0, -5.0)) // back to south side
-        det.onSample(sample(41_000, 0.0, 5.0))  // crossing at 40_500
+        det.onSample(sample(1_000, 0.0, 5.0))   // crossing 1 at ~500
+        det.onSample(sample(40_000, 0.0, -5.0)) // teleport-cross at ~20_500 -> ignored
+        det.onSample(sample(41_000, 0.0, 5.0))  // crossing 2 at ~40_500
         val laps = det.laps()
         assertEquals(1, laps.size)
-        assertEquals(40_000L, laps[0].durationMs)
+        assertEquals(40_000.0, laps[0].durationMs.toDouble(), 1.0)
         assertEquals(1, laps[0].index)
     }
 
