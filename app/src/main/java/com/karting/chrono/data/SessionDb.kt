@@ -43,6 +43,24 @@ data class LapEntity(
     @ColumnInfo(name = "end_ms") val endMs: Long,
 )
 
+@Entity(
+    tableName = "track_point",
+    foreignKeys = [ForeignKey(
+        entity = SessionEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["session_id"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+    indices = [Index("session_id")],
+)
+data class TrackPointEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "session_id") val sessionId: Long,
+    @ColumnInfo(name = "ts_ms") val tsMs: Long,
+    @ColumnInfo(name = "lat") val lat: Double,
+    @ColumnInfo(name = "lon") val lon: Double,
+)
+
 @Dao
 interface SessionDao {
     @Insert
@@ -54,20 +72,33 @@ interface SessionDao {
     @Insert
     suspend fun insertLap(l: LapEntity): Long
 
+    @Insert
+    suspend fun insertPoint(p: TrackPointEntity): Long
+
     @Query("SELECT * FROM session ORDER BY started_at DESC")
     fun observeAllSessions(): Flow<List<SessionEntity>>
 
     @Query("SELECT * FROM session WHERE id = :id")
     suspend fun getSession(id: Long): SessionEntity?
 
+    @Query("SELECT * FROM session ORDER BY started_at DESC LIMIT 1")
+    suspend fun getLatestSession(): SessionEntity?
+
     @Query("SELECT * FROM lap WHERE session_id = :sessionId ORDER BY lap_index")
     suspend fun getLaps(sessionId: Long): List<LapEntity>
 
     @Query("SELECT * FROM lap WHERE session_id = :sessionId ORDER BY lap_index")
     fun observeLaps(sessionId: Long): Flow<List<LapEntity>>
+
+    @Query("SELECT * FROM track_point WHERE session_id = :sessionId ORDER BY ts_ms")
+    suspend fun getPoints(sessionId: Long): List<TrackPointEntity>
 }
 
-@Database(entities = [SessionEntity::class, LapEntity::class], version = 1, exportSchema = false)
+@Database(
+    entities = [SessionEntity::class, LapEntity::class, TrackPointEntity::class],
+    version = 2,
+    exportSchema = false,
+)
 abstract class SessionDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
 
@@ -79,7 +110,12 @@ abstract class SessionDatabase : RoomDatabase() {
                 context.applicationContext,
                 SessionDatabase::class.java,
                 "karting.db",
-            ).build().also { instance = it }
+            )
+                // Schema bumped from v1 to v2 (added track_point). On upgrade we
+                // drop and recreate — old sessions are not worth preserving here.
+                .fallbackToDestructiveMigration()
+                .build()
+                .also { instance = it }
         }
     }
 }

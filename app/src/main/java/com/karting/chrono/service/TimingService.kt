@@ -23,6 +23,7 @@ import com.karting.chrono.data.FinishLinePrefs
 import com.karting.chrono.data.LapEntity
 import com.karting.chrono.data.SessionDatabase
 import com.karting.chrono.data.SessionEntity
+import com.karting.chrono.data.TrackPointEntity
 import com.karting.chrono.location.GpsManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,6 +55,8 @@ class TimingService : LifecycleService() {
         val lastLapMs: Long? = null,
         val bestLapMs: Long? = null,
         val laps: List<Lap> = emptyList(),
+        /** Recent GPS samples for the live track view, capped to keep memory bounded. */
+        val trackPoints: List<GpsSample> = emptyList(),
         val gpsHasFix: Boolean = false,
         val gpsAccuracyM: Double? = null,
         val gpsLastFixAtMs: Long? = null,
@@ -110,12 +113,23 @@ class TimingService : LifecycleService() {
         det: LapDetector,
         db: SessionDatabase,
     ) {
+        // Persist every fix to the track-point table for the post-session view.
+        db.sessionDao().insertPoint(
+            TrackPointEntity(
+                sessionId = sessionId,
+                tsMs = sample.timestampMs,
+                lat = sample.latDeg,
+                lon = sample.lonDeg,
+            )
+        )
         _state.update {
             it.copy(
                 gpsHasFix = true,
                 gpsAccuracyM = sample.accuracyM,
                 gpsLastFixAtMs = System.currentTimeMillis(),
                 lapStartMs = det.currentLapStartMs() ?: it.lapStartMs,
+                // Keep the last ~1 hour at 1 Hz to bound memory.
+                trackPoints = (it.trackPoints + sample).takeLast(MAX_LIVE_POINTS),
             )
         }
         when (val ev = det.onSample(sample)) {
@@ -162,7 +176,9 @@ class TimingService : LifecycleService() {
         sessionId = -1L
         detector = null
         releaseWakeLock()
-        _state.value = State()
+        // Keep the laps and track in state so the Summary screen can show them
+        // immediately. Mark running=false so the UI knows the session ended.
+        _state.update { it.copy(running = false, lapStartMs = null) }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -229,6 +245,7 @@ class TimingService : LifecycleService() {
 
     companion object {
         private const val NOTIF_ID = 1001
+        private const val MAX_LIVE_POINTS = 3600 // 1 hr @ 1 Hz
         const val ACTION_START = "com.karting.chrono.START"
         const val ACTION_STOP = "com.karting.chrono.STOP"
 
