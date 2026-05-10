@@ -52,6 +52,9 @@ fun LiveTimingScreen(
                     samples = state.trackPoints,
                     finishLine = finishLine,
                     title = "Track",
+                    // Crown rotation only zooms the track when it's the
+                    // visible page, so the off-screen instance stays inert.
+                    interactionEnabled = pagerState.currentPage == 1,
                 )
             }
         }
