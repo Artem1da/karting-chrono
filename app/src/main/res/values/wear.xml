@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Capability advertised by the watch app over the Wearable Data Layer.
+  The phone app queries this capability to discover paired watches.
+-->
+<resources>
+    <string-array name="android_wear_capabilities">
+        <item>karting_chrono_watch</item>
+    </string-array>
+</resources>

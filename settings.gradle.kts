@@ -26,4 +26,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "KartingChrono"
-include(":app", ":core")
+include(":app", ":phone", ":core", ":sync")

@@ -25,6 +25,9 @@ import com.karting.chrono.data.SessionDatabase
 import com.karting.chrono.data.SessionEntity
 import com.karting.chrono.data.TrackPointEntity
 import com.karting.chrono.location.GpsManager
+import com.karting.chrono.sync.ActiveSessionStatus
+import com.karting.chrono.sync.WatchSync
+import com.karting.chrono.sync.WearablePaths
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,6 +69,9 @@ class TimingService : LifecycleService() {
     private var timingJob: Job? = null
     private var detector: LapDetector? = null
     private var sessionId: Long = -1L
+    private var sessionStartedAtMs: Long = 0L
+    private var sessionLine: FinishLine? = null
+    private val sync by lazy { WatchSync(this) }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -87,9 +93,10 @@ class TimingService : LifecycleService() {
                 ?: run { stopTiming(); return@launch }
 
             val db = SessionDatabase.get(ctx)
+            val now = System.currentTimeMillis()
             sessionId = db.sessionDao().insertSession(
                 SessionEntity(
-                    startedAt = System.currentTimeMillis(),
+                    startedAt = now,
                     endedAt = null,
                     lineALat = line.aLatDeg,
                     lineALon = line.aLonDeg,
@@ -97,10 +104,18 @@ class TimingService : LifecycleService() {
                     lineBLon = line.bLonDeg,
                 )
             )
+            sessionStartedAtMs = now
+            sessionLine = line
 
             val det = LapDetector(line, LapDetectorConfig())
             detector = det
             _state.update { it.copy(running = true, sessionId = sessionId) }
+
+            // Phone-side banner: tell the companion a session is starting,
+            // and post the initial active-session DataItem so any phone that
+            // opens the app right now sees the live status.
+            sync.broadcast(WearablePaths.MSG_SESSION_STARTED)
+            sync.publishActiveSession(currentStatus())
 
             GpsManager(ctx).samples().collect { sample ->
                 onGpsSample(sample, det, db)
@@ -154,11 +169,24 @@ class TimingService : LifecycleService() {
                     )
                 }
                 refreshNotification()
+                sync.publishActiveSession(currentStatus())
             }
             is DetectorEvent.Idle,
             is DetectorEvent.FirstFix,
             is DetectorEvent.CrossingIgnored -> Unit
         }
+    }
+
+    private fun currentStatus(): ActiveSessionStatus {
+        val s = _state.value
+        return ActiveSessionStatus(
+            sessionId = sessionId,
+            startedAtMs = sessionStartedAtMs,
+            lapStartMs = s.lapStartMs,
+            lapCount = s.lapCount,
+            bestLapMs = s.bestLapMs,
+            lastLapMs = s.lastLapMs,
+        )
     }
 
     private fun stopTiming() {
@@ -167,13 +195,35 @@ class TimingService : LifecycleService() {
         job?.cancel()
 
         val sid = sessionId
+        val startedAt = sessionStartedAtMs
+        val line = sessionLine
+        val finalLaps = _state.value.laps
+        val finalTrack = _state.value.trackPoints
+        val endedAt = System.currentTimeMillis()
+
         if (sid > 0) {
             val db = SessionDatabase.get(this)
             lifecycleScope.launch {
-                db.sessionDao().finishSession(sid, System.currentTimeMillis())
+                db.sessionDao().finishSession(sid, endedAt)
+                // Push final session payload to the phone so the companion
+                // app gets the full lap and track listing for offline browsing.
+                if (line != null) {
+                    sync.publishFinishedSession(
+                        sessionId = sid,
+                        startedAtMs = startedAt,
+                        endedAtMs = endedAt,
+                        line = line,
+                        laps = finalLaps,
+                        track = finalTrack,
+                    )
+                }
+                sync.clearActiveSession()
+                sync.broadcast(WearablePaths.MSG_SESSION_ENDED)
             }
         }
         sessionId = -1L
+        sessionStartedAtMs = 0L
+        sessionLine = null
         detector = null
         releaseWakeLock()
         // Keep the laps and track in state so the Summary screen can show them

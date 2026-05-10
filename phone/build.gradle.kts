@@ -6,12 +6,14 @@ plugins {
 }
 
 android {
-    namespace = "com.karting.chrono"
+    namespace = "com.karting.chrono.phone"
     compileSdk = 35
 
     defaultConfig {
+        // Same applicationId as the watch module so they form one Play
+        // listing and share the Wearable Data Layer namespace.
         applicationId = "com.karting.chrono"
-        minSdk = 30
+        minSdk = 26
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -52,23 +54,15 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.androidx.lifecycle.service)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.material3)
+    implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.navigation.compose)
     debugImplementation(libs.androidx.compose.ui.tooling)
-
-    implementation(libs.androidx.wear)
-    implementation(libs.androidx.wear.compose.material)
-    implementation(libs.androidx.wear.compose.foundation)
-    implementation(libs.androidx.wear.compose.navigation)
-    implementation(libs.androidx.wear.tooling.preview)
-
-    implementation(libs.play.services.location)
-
-    implementation(libs.androidx.datastore.preferences)
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
